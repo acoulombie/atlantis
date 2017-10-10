@@ -23,7 +23,7 @@ import (
 	"github.com/hootsuite/atlantis/run"
 	"github.com/hootsuite/atlantis/static"
 	"github.com/hootsuite/atlantis/terraform"
-	homedir "github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/go-homedir"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	"github.com/urfave/negroni"
@@ -106,14 +106,11 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 	applyExecutor := &ApplyExecutor{
 		github:                githubClient,
-		githubStatus:          githubStatus,
 		terraform:             terraformClient,
-		githubCommentRenderer: githubComments,
 		locker:                lockingClient,
 		requireApproval:       config.RequireApproval,
 		run:                   run,
 		configReader:          configReader,
-		concurrentRunLocker:   concurrentRunLocker,
 		workspace:             workspace,
 	}
 	planExecutor := &PlanExecutor{
@@ -127,9 +124,7 @@ func NewServer(config ServerConfig) (*Server, error) {
 		concurrentRunLocker:   concurrentRunLocker,
 		workspace:             workspace,
 	}
-	helpExecutor := &HelpExecutor{
-		Github: githubClient,
-	}
+	helpExecutor := &HelpExecutor{}
 	pullClosedExecutor := &PullClosedExecutor{
 		Github:    githubClient,
 		Locker:    lockingClient,
@@ -141,12 +136,15 @@ func NewServer(config ServerConfig) (*Server, error) {
 		GithubToken: config.GithubToken,
 	}
 	commandHandler := &CommandHandler{
-		ApplyExecutor: applyExecutor,
-		PlanExecutor:  planExecutor,
-		HelpExecutor:  helpExecutor,
-		EventParser:   eventParser,
-		GithubClient:  githubClient,
-		Logger:        logger,
+		ApplyExecutor:     applyExecutor,
+		PlanExecutor:      planExecutor,
+		HelpExecutor:      helpExecutor,
+		EventParser:       eventParser,
+		GHClient:          githubClient,
+		GHStatus:          githubStatus,
+		RunLocker:         concurrentRunLocker,
+		GHCommentRenderer: githubComments,
+		Logger:            logger,
 	}
 	router := mux.NewRouter()
 	return &Server{

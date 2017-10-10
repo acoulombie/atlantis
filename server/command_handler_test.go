@@ -33,7 +33,7 @@ func TestExecuteCommand_PullErr(t *testing.T) {
 		PlanExecutor:  planner,
 		ApplyExecutor: applier,
 		HelpExecutor:  helper,
-		GithubClient:  ghClient,
+		GHClient:      ghClient,
 		EventParser:   parser,
 		Logger:        logging.NewSimpleLogger("", log.New(os.Stderr, "", log.LstdFlags), false, logging.Debug),
 	}
@@ -57,7 +57,7 @@ func TestExecuteCommand_ExtractErr(t *testing.T) {
 		PlanExecutor:  planner,
 		ApplyExecutor: applier,
 		HelpExecutor:  helper,
-		GithubClient:  ghClient,
+		GHClient:      ghClient,
 		EventParser:   parser,
 		Logger:        logging.NewSimpleLogger("", log.New(os.Stderr, "", log.LstdFlags), false, logging.Debug),
 	}
@@ -86,7 +86,7 @@ func TestExecuteCommand_ClosedPull(t *testing.T) {
 		PlanExecutor:  planner,
 		ApplyExecutor: applier,
 		HelpExecutor:  helper,
-		GithubClient:  ghClient,
+		GHClient:      ghClient,
 		EventParser:   parser,
 		Logger:        logging.NewSimpleLogger("", log.New(os.Stderr, "", log.LstdFlags), false, logging.Debug),
 	}
@@ -118,7 +118,7 @@ func TestExecuteCommand_Executors(t *testing.T) {
 		PlanExecutor:  planner,
 		ApplyExecutor: applier,
 		HelpExecutor:  helper,
-		GithubClient:  ghClient,
+		GHClient:      ghClient,
 		EventParser:   parser,
 		Logger:        logging.NewSimpleLogger("", log.New(os.Stderr, "", log.LstdFlags), false, logging.Debug),
 	}

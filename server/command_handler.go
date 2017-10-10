@@ -9,12 +9,15 @@ import (
 )
 
 type CommandHandler struct {
-	PlanExecutor  Planner
-	ApplyExecutor Executor
-	HelpExecutor  Executor
-	GithubClient  github.Client
-	EventParser   EventParsing
-	Logger        *logging.SimpleLogger
+	PlanExecutor      Planner
+	ApplyExecutor     Executor
+	HelpExecutor      Executor
+	GHClient          github.Client
+	GHStatus          *GithubStatus
+	EventParser       EventParsing
+	RunLocker         *ConcurrentRunLocker
+	GHCommentRenderer *GithubCommentRenderer
+	Logger            *logging.SimpleLogger
 }
 
 type CommandResponse struct {
@@ -64,13 +67,14 @@ func (c CommandName) String() string {
 }
 
 func (c *CommandHandler) ExecuteCommand(ctx *CommandContext) {
+	// Set up logger specific to this command.
+	// It's safe to reuse the underlying logger.
 	src := fmt.Sprintf("%s/pull/%d", ctx.BaseRepo.FullName, ctx.Pull.Num)
-	// it's safe to reuse the underlying logger
 	ctx.Log = logging.NewSimpleLogger(src, c.Logger.Logger, true, c.Logger.Level)
 	defer c.logPanics(ctx)
 
 	// need to get additional data from the PR
-	ghPull, _, err := c.GithubClient.GetPullRequest(ctx.BaseRepo, ctx.Pull.Num)
+	ghPull, _, err := c.GHClient.GetPullRequest(ctx.BaseRepo, ctx.Pull.Num)
 	if err != nil {
 		ctx.Log.Err("making pull request API call to GitHub: %s", err)
 		return
@@ -78,7 +82,7 @@ func (c *CommandHandler) ExecuteCommand(ctx *CommandContext) {
 
 	if ghPull.GetState() != "open" {
 		ctx.Log.Info("command was run on closed pull request")
-		c.GithubClient.CreateComment(ctx.BaseRepo, ctx.Pull, "Atlantis commands can't be run on closed pull requests")
+		c.GHClient.CreateComment(ctx.BaseRepo, ctx.Pull, "Atlantis commands can't be run on closed pull requests")
 		return
 	}
 
@@ -92,9 +96,9 @@ func (c *CommandHandler) ExecuteCommand(ctx *CommandContext) {
 
 	switch ctx.Command.Name {
 	case Plan:
-		c.PlanExecutor.Execute(ctx)
+		c.ExecutePlanOrApply(ctx)
 	case Apply:
-		c.ApplyExecutor.Execute(ctx)
+		c.ExecutePlanOrApply(ctx)
 	case Help:
 		c.HelpExecutor.Execute(ctx)
 	default:
@@ -106,11 +110,52 @@ func (c *CommandHandler) SetLockURL(f func(id string) (url string)) {
 	c.PlanExecutor.SetLockURL(f)
 }
 
+func (c *CommandHandler) ExecutePlanOrApply(ctx *CommandContext) {
+	c.GHStatus.Update(ctx.BaseRepo, ctx.Pull, Pending, ctx.Command)
+	if c.RunLocker.TryLock(ctx.BaseRepo.FullName, ctx.Command.Environment, ctx.Pull.Num) != true {
+		errMsg := fmt.Sprintf(
+			"The %s environment is currently locked by another"+
+				" command that is running for this pull request."+
+				" Wait until the previous command is complete and try again.",
+			ctx.Command.Environment)
+		ctx.Log.Warn(errMsg)
+		c.updatePull(ctx, CommandResponse{Failure: errMsg})
+		return
+	}
+	defer c.RunLocker.Unlock(ctx.BaseRepo.FullName, ctx.Command.Environment, ctx.Pull.Num)
+
+	var cr CommandResponse
+	switch ctx.Command.Name {
+	case Plan:
+		cr = c.PlanExecutor.Execute(ctx)
+	case Apply:
+		cr = c.ApplyExecutor.Execute(ctx)
+	}
+	c.updatePull(ctx, cr)
+}
+
 // logPanics logs and creates a comment on the pull request for panics
 func (c *CommandHandler) logPanics(ctx *CommandContext) {
 	if err := recover(); err != nil {
 		stack := recovery.Stack(3)
-		c.GithubClient.CreateComment(ctx.BaseRepo, ctx.Pull, fmt.Sprintf("**Error: goroutine panic. This is a bug.**\n```\n%s\n%s```", err, stack))
+		c.GHClient.CreateComment(ctx.BaseRepo, ctx.Pull,
+			fmt.Sprintf("**Error: goroutine panic. This is a bug.**\n```\n%s\n%s```", err, stack))
 		ctx.Log.Err("PANIC: %s\n%s", err, stack)
 	}
+}
+
+func (c *CommandHandler) updatePull(ctx *CommandContext, res CommandResponse) {
+	// Log if we got any errors or failures.
+	if res.Error != nil {
+		ctx.Log.Err(res.Error.Error())
+	} else if res.Failure != "" {
+		ctx.Log.Warn(res.Failure)
+	}
+
+	// Now update the pull request's status icon and comment back.
+	c.GHStatus.UpdateProjectResult(ctx, res)
+
+	res.Command = ctx.Command.Name
+	comment := c.GHCommentRenderer.Render(res, ctx.Log.History.String(), ctx.Command.Verbose)
+	c.GHClient.CreateComment(ctx.BaseRepo, ctx.Pull, comment)
 }
